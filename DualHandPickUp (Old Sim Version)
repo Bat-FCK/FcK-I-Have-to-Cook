@@ -1,0 +1,350 @@
+using UnityEngine;
+
+public class DualHandBuildPickup : MonoBehaviour
+{
+    [Header("References")]
+    public Camera playerCamera;
+    public Transform rightHandHold;
+    public Transform leftHandHold;
+
+    [Header("Settings")]
+    private float pickupDistance = 2f;
+    private float rotationStep = 15f;
+
+    GameObject rightObj;
+    GameObject leftObj;
+
+    Rigidbody rightRB;
+    Rigidbody leftRB;
+
+    RigidbodyConstraints rightOriginalConstraints;
+    RigidbodyConstraints leftOriginalConstraints;
+
+    [Header("Build Mode")]
+    public bool buildMode = false;
+    public GameObject heldBuildObj;
+    private float currentRotation = 0f;
+
+    [Header("Knife Settings")]
+    private float cutHoldTime = 2f; // Kesme süresi 1 saniye
+    private float cutTimer = 0f;
+
+    private float knifeAnimSpeed = 10f;
+    private float knifeAnimDistance = 0.05f;
+
+    Transform knifeHand;
+    GameObject knifeObj;
+    Vector3 knifeBaseLocalPos;
+
+    void Awake()
+    {
+        if (playerCamera == null)
+            playerCamera = Camera.main;
+        if (rightHandHold == null)
+            rightHandHold = transform.Find("RightHandHold");
+        if (leftHandHold == null)
+            leftHandHold = transform.Find("LeftHandHold");
+    }
+
+    void Update()
+    {
+        if (playerCamera == null || rightHandHold == null || leftHandHold == null)
+            return;
+
+        if (Input.GetKeyDown(KeyCode.B))
+            buildMode = !buildMode;
+
+        HandleRightHand();
+        HandleLeftHandNormal();
+        UpdateHeldObjects();
+
+        HandleCutting();
+
+        if (buildMode && heldBuildObj != null && Input.GetKeyDown(KeyCode.R))
+        {
+            currentRotation += rotationStep;
+            heldBuildObj.transform.rotation = Quaternion.Euler(0, currentRotation, 0);
+        }
+    }
+
+    void UpdateHeldObjects()
+    {
+        // Sağ el
+        if (rightObj != null)
+        {
+            rightObj.transform.position = rightHandHold.position;
+            if (rightObj.name.Contains("Knife"))
+            {
+                rightObj.transform.rotation = rightHandHold.rotation * Quaternion.Euler(0, 0, 90);
+                knifeHand = rightHandHold;
+                knifeObj = rightObj;
+                knifeBaseLocalPos = Vector3.zero;
+            }
+            else
+                rightObj.transform.rotation = rightHandHold.rotation;
+        }
+
+        // Sol el
+        if (leftObj != null)
+        {
+            leftObj.transform.position = leftHandHold.position;
+            if (leftObj.name.Contains("Knife"))
+            {
+                leftObj.transform.rotation = leftHandHold.rotation * Quaternion.Euler(0, 0, 90);
+                knifeHand = leftHandHold;
+                knifeObj = leftObj;
+                knifeBaseLocalPos = Vector3.zero;
+            }
+            else
+                leftObj.transform.rotation = leftHandHold.rotation;
+        }
+
+        if (heldBuildObj != null)
+            heldBuildObj.transform.position = rightHandHold.position;
+    }
+
+    void HandleRightHand()
+    {
+        if (Input.GetKeyDown(KeyCode.E))
+        {
+            if (buildMode)
+            {
+                if (heldBuildObj == null)
+                    TryPickupBuildObject();
+                else
+                    PlaceBuildObject();
+            }
+            else
+            {
+                if (rightObj == null)
+                    TryPickup(rightHandHold, ref rightObj, ref rightRB, ref rightOriginalConstraints);
+                else
+                    PlaceObject(ref rightObj, ref rightRB, ref rightOriginalConstraints);
+            }
+        }
+    }
+
+    void HandleLeftHandNormal()
+    {
+        if (buildMode) return;
+
+        if (Input.GetKeyDown(KeyCode.Q))
+        {
+            if (leftObj == null)
+                TryPickup(leftHandHold, ref leftObj, ref leftRB, ref leftOriginalConstraints);
+            else
+                PlaceObject(ref leftObj, ref leftRB, ref leftOriginalConstraints);
+        }
+    }
+
+    void TryPickup(Transform holdPoint, ref GameObject heldObj, ref Rigidbody heldRB, ref RigidbodyConstraints originalConstraints)
+{
+    Ray ray = new Ray(playerCamera.transform.position, playerCamera.transform.forward);
+
+    if (!Physics.Raycast(ray, out RaycastHit hit, pickupDistance))
+        return;
+
+    // Normal Pickup objesi
+    if (hit.collider.CompareTag("Pickup"))
+    {
+        Rigidbody existingRB = hit.collider.GetComponent<Rigidbody>();
+        if (existingRB == null) return;
+
+        heldObj = existingRB.gameObject;
+        heldRB = existingRB;
+        originalConstraints = existingRB.constraints;
+
+        existingRB.linearVelocity = Vector3.zero;
+        existingRB.angularVelocity = Vector3.zero;
+        existingRB.useGravity = false;
+        existingRB.isKinematic = true;
+        existingRB.constraints = RigidbodyConstraints.FreezeRotation;
+
+        heldObj.transform.SetParent(holdPoint, true);
+
+        if (heldObj.name.Contains("Knife"))
+        {
+            knifeHand = holdPoint;
+            knifeObj = heldObj;
+            knifeBaseLocalPos = Vector3.zero;
+        }
+
+        return;
+    }
+
+KUTUUUU box = hit.collider.GetComponent<KUTUUUU>();
+if (box != null)
+{
+    // 1️⃣ Eğer elimde obje varsa ve kutuya geri koymak için tuşa basıldı
+    if (heldObj != null && heldObj.name.Contains(box.prefabInside.name)) 
+    {
+        // Rigidbody ayarlarını sıfırla ve objeyi kutuya geri koy
+        heldRB.isKinematic = false;
+        heldRB.useGravity = true;
+        heldObj.transform.SetParent(null);
+        Destroy(heldObj); // veya kutuya yerleştirmek istiyorsan uygun pozisyon ayarla
+
+        heldObj = null;
+        heldRB = null;
+
+        // Kutunun içine geri koy
+        box.storedCount++;
+        Debug.Log("Prefab kutuya geri kondu. Kutu içinde kalan: " + box.storedCount);
+    }
+    // 2️⃣ Eğer elimde obje yoksa veya kutuya alma işlemi
+    else if (box.prefabInside != null && box.storedCount > 0)
+    {
+        GameObject spawnedPrefab = Instantiate(box.prefabInside, holdPoint.position, holdPoint.rotation);
+
+        Rigidbody rb = spawnedPrefab.GetComponent<Rigidbody>();
+        if (rb == null) rb = spawnedPrefab.AddComponent<Rigidbody>();
+
+        rb.useGravity = false;
+        rb.isKinematic = true;
+        rb.constraints = RigidbodyConstraints.FreezeRotation;
+
+        heldObj = spawnedPrefab;
+        heldRB = rb;
+        heldObj.transform.SetParent(holdPoint, true);
+        originalConstraints = rb.constraints;
+
+        box.storedCount--;
+        Debug.Log("Kutu içinden alındı. Kutu içinde kalan: " + box.storedCount);
+
+        // Eğer prefab Knife ise el animasyonunu ayarla
+        if (heldObj.name.Contains("Knife"))
+        {
+            knifeHand = holdPoint;
+            knifeObj = heldObj;
+            knifeBaseLocalPos = Vector3.zero;
+        }
+    }
+}
+}
+
+    void PlaceObject(ref GameObject heldObj, ref Rigidbody heldRB, ref RigidbodyConstraints originalConstraints)
+    {
+        if (heldObj == null) return;
+
+        Ray ray = new Ray(playerCamera.transform.position, playerCamera.transform.forward);
+        Vector3 placePosition = (Physics.Raycast(ray, out RaycastHit hit, 2f)) ? hit.point : playerCamera.transform.position + playerCamera.transform.forward * 2f;
+
+        heldObj.transform.SetParent(null);
+        heldObj.transform.position = placePosition;
+        heldObj.transform.rotation = Quaternion.identity;
+
+        heldRB.isKinematic = false;
+        heldRB.useGravity = true;
+        heldRB.constraints = originalConstraints;
+
+        if (knifeObj == heldObj)
+        {
+            knifeObj = null;
+            knifeHand = null;
+        }
+
+        heldObj = null;
+        heldRB = null;
+    }
+
+    void TryPickupBuildObject()
+    {
+        Ray ray = new Ray(playerCamera.transform.position, playerCamera.transform.forward);
+
+        if (!Physics.Raycast(ray, out RaycastHit hit, pickupDistance)) return;
+        if (!hit.collider.CompareTag("BuildPickUp")) return;
+
+        Rigidbody rb = hit.collider.GetComponent<Rigidbody>();
+        if (rb == null) return;
+
+        heldBuildObj = rb.gameObject;
+
+        rb.linearVelocity = Vector3.zero;
+        rb.angularVelocity = Vector3.zero;
+        rb.useGravity = false;
+        rb.isKinematic = true;
+        rb.constraints = RigidbodyConstraints.FreezeRotation;
+
+        heldBuildObj.transform.SetParent(rightHandHold, true);
+        currentRotation = 0f;
+    }
+
+    void PlaceBuildObject()
+    {
+        if (heldBuildObj == null) return;
+
+        Ray ray = new Ray(playerCamera.transform.position, playerCamera.transform.forward);
+        Vector3 placePosition = (Physics.Raycast(ray, out RaycastHit hit, 2f)) ? hit.point : playerCamera.transform.position + playerCamera.transform.forward * 2f;
+
+        heldBuildObj.transform.SetParent(null);
+        heldBuildObj.transform.position = placePosition;
+        heldBuildObj.transform.rotation = Quaternion.Euler(0, currentRotation, 0);
+
+        Rigidbody rb = heldBuildObj.GetComponent<Rigidbody>();
+        if (rb != null)
+        {
+            rb.isKinematic = false;
+            rb.useGravity = true;
+            rb.constraints = RigidbodyConstraints.None;
+        }
+
+        heldBuildObj = null;
+    }
+
+    void HandleCutting()
+    {
+        if (knifeObj == null || knifeHand == null) return;
+
+        if (Input.GetMouseButton(0))
+        {
+            cutTimer += Time.deltaTime;
+            AnimateKnife();
+
+            if (cutTimer >= cutHoldTime)
+            {
+                TryCutObject();
+                cutTimer = 0f;
+            }
+        }
+        else
+        {
+            cutTimer = 0f;
+
+            // Elden bırakılınca animasyonu sıfırla
+            if (knifeObj != null && knifeHand != null)
+                knifeObj.transform.localPosition = Vector3.zero;
+        }
+    }
+
+    void AnimateKnife()
+    {
+        if (knifeObj == null || knifeHand == null) return;
+
+        float offset = Mathf.Sin(Time.time * knifeAnimSpeed) * knifeAnimDistance;
+        knifeObj.transform.localPosition = knifeBaseLocalPos + knifeHand.forward * offset;
+        knifeObj.transform.rotation = knifeHand.rotation * Quaternion.Euler(0, 0, 90);
+    }
+
+
+    void TryCutObject()
+    {
+    if (knifeObj == null) return;
+
+    // Kamera yönünden raycast
+    Vector3 start = playerCamera.transform.position;
+    Vector3 dir = playerCamera.transform.forward;
+    float distance = 2f; // kesme mesafesi
+
+    if (!Physics.Raycast(start, dir, out RaycastHit hit, distance)) return;
+
+    CuttableObject cuttable = hit.collider.GetComponent<CuttableObject>();
+    if (cuttable == null || cuttable.cutResultPrefab == null) return;
+
+    for (int i = 0; i < cuttable.spawnCount; i++)
+    {
+        Vector3 spawnPos = hit.collider.transform.position + Random.insideUnitSphere * 0.1f; // Rastgele küçük offset
+        Instantiate(cuttable.cutResultPrefab, spawnPos, hit.collider.transform.rotation);
+    }
+    Destroy(hit.collider.gameObject);
+    }
+}
